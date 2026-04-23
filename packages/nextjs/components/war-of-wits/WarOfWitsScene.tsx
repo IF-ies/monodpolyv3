@@ -10,13 +10,6 @@ import { motion } from "framer-motion";
 import { useAccount } from "wagmi";
 
 type GamePhase = "LOBBY" | "PLAYING" | "ELIMINATED" | "FINISHED";
-type ContestSyncState = {
-  started: boolean;
-  startedAt: number | null;
-  readyParticipants: string[];
-  countdownStartedAt: number | null;
-  countdownSeconds: number;
-};
 type SabotageType = "freeze" | "shorten" | "hide";
 type SabotageEvent = {
   id: number;
@@ -118,18 +111,11 @@ const reducer = (state: GameStore, action: GameAction): GameStore => {
 
 export const WarOfWitsScene = () => {
   const { address, isConnected } = useAccount();
-  const playerAddress = isConnected && address ? address.toLowerCase() : null;
+  const playerAddress = isConnected && address ? address.toLowerCase() : "demo-player";
   const [store, dispatch] = useReducer(reducer, initialState);
-  const [participants, setParticipants] = useState<string[]>([]);
-  const [contestSync, setContestSync] = useState<ContestSyncState>({
-    started: false,
-    startedAt: null,
-    readyParticipants: [],
-    countdownStartedAt: null,
-    countdownSeconds: 5,
-  });
+  const [joinedPlayers, setJoinedPlayers] = useState<string[]>([]);
   const [walletBalance, setWalletBalance] = useState(250);
-  const [statusMessage, setStatusMessage] = useState("Connect wallet and join the lobby.");
+  const [statusMessage, setStatusMessage] = useState("Demo mode: press Join and play instantly.");
   const [winners] = useState<WinnerItem[]>([]);
   const [eliminations] = useState<EliminationItem[]>([]);
   const [freezeUntil, setFreezeUntil] = useState(0);
@@ -147,51 +133,13 @@ export const WarOfWitsScene = () => {
   const isFrozen = nowMs < freezeUntil;
   const isTimerHidden = nowMs < hideTimerUntil;
   const sabotageOnCooldown = store.phase === "PLAYING" && lastSabotageQuestionIndex === store.currentQuestionIndex;
-  const alivePlayers = participants.length;
+  const alivePlayers = joinedPlayers.length;
   const potentialEarnings = alivePlayers > 0 ? store.pot / alivePlayers : store.pot;
-  const winnerCandidate = playerAddress && participants.length === 1 && participants[0] === playerAddress;
-  const countdownLeft = contestSync.countdownStartedAt
-    ? Math.max(0, contestSync.countdownSeconds - Math.floor((Date.now() - contestSync.countdownStartedAt) / 1000))
-    : null;
-
-  const syncParticipants = async () => {
-    const response = await fetch("/api/contest/participants", { cache: "no-store" });
-    if (!response.ok) return;
-    const data = (await response.json()) as { participants?: string[] };
-    setParticipants(data.participants ?? []);
-  };
-
-  const syncReadyState = async () => {
-    const response = await fetch("/api/contest/state", { cache: "no-store" });
-    if (!response.ok) return null;
-    const data = (await response.json()) as Partial<ContestSyncState>;
-    const nextReady = Array.isArray(data.readyParticipants) ? data.readyParticipants : [];
-    const normalized: ContestSyncState = {
-      started: Boolean(data.started),
-      startedAt: typeof data.startedAt === "number" ? data.startedAt : null,
-      readyParticipants: nextReady,
-      countdownStartedAt: typeof data.countdownStartedAt === "number" ? data.countdownStartedAt : null,
-      countdownSeconds: typeof data.countdownSeconds === "number" ? data.countdownSeconds : 5,
-    };
-    setContestSync(normalized);
-    if (
-      normalized.started &&
-      store.phase === "LOBBY" &&
-      store.hasJoined &&
-      !store.isEliminated &&
-      participants.length > 0
-    ) {
-      dispatch({ type: "START_PLAYING", timer: QUESTION_SECONDS });
-      setStatusMessage("Match started. Good luck.");
-    }
-    return normalized;
-  };
+  const winnerCandidate = playerAddress && joinedPlayers.length === 1 && joinedPlayers[0] === playerAddress;
 
   const syncSabotageEvents = async () => {
-    const response = await fetch("/api/contest/sabotage", { cache: "no-store" });
-    if (!response.ok) return;
-    const data = (await response.json()) as { events?: SabotageEvent[] };
-    const events = Array.isArray(data.events) ? data.events : [];
+    // Demo mode: sabotage effects remain local mock only.
+    const events: SabotageEvent[] = [];
     if (events.length === 0) return;
 
     let latest = lastProcessedSabotageId;
@@ -221,13 +169,7 @@ export const WarOfWitsScene = () => {
   };
 
   const updateStartedState = async (started: boolean) => {
-    await fetch("/api/contest/state", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ started, startedAt: started ? Date.now() : null }),
-    });
     if (!started) {
-      await fetch("/api/contest/sabotage", { method: "DELETE" });
       setLastProcessedSabotageId(0);
       setFreezeUntil(0);
       setHideTimerUntil(0);
@@ -236,28 +178,20 @@ export const WarOfWitsScene = () => {
 
   const joinGame = async () => {
     if (!playerAddress || store.hasJoined) return;
-    await fetch("/api/contest/participants", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address: playerAddress }),
-    });
+    setJoinedPlayers([playerAddress]);
+    setStablePlayerCount(1);
     dispatch({ type: "JOIN", entryFee: ENTRY_FEE });
+    dispatch({ type: "START_PLAYING", timer: QUESTION_SECONDS });
     setWalletBalance(previous => Math.max(0, previous - ENTRY_FEE));
-    setStatusMessage("Joined. 10-second join window started.");
-    await syncParticipants();
-    await syncReadyState();
+    setStatusMessage("Joined. Demo round started.");
   };
 
   const eliminateCurrentPlayer = async (reason: string) => {
     if (!playerAddress || store.isEliminated) return;
     dispatch({ type: "ELIMINATE" });
     setStatusMessage(`Eliminated: ${reason}`);
-    await fetch("/api/contest/participants", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address: playerAddress }),
-    });
-    await syncParticipants();
+    setJoinedPlayers([]);
+    setStablePlayerCount(0);
   };
 
   const onSelectAnswer = (optionId: string) => {
@@ -283,16 +217,6 @@ export const WarOfWitsScene = () => {
     }
     setWalletBalance(previous => Math.max(0, previous - spend));
 
-    const response = await fetch("/api/contest/sabotage", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type, from: playerAddress, amount: spend }),
-    });
-    if (!response.ok) {
-      setStatusMessage("Sabotage failed.");
-      return;
-    }
-
     setStatusMessage(`${label} activated. ${spend.toFixed(2)} MON added to reward pool.`);
     setLastSabotageQuestionIndex(store.currentQuestionIndex);
     await syncSabotageEvents();
@@ -300,7 +224,7 @@ export const WarOfWitsScene = () => {
 
   const autoDistributeReward = () => {
     if (store.phase !== "FINISHED" || store.rewardClaimed) return;
-    const survivors = Math.max(1, participants.length);
+    const survivors = Math.max(1, joinedPlayers.length);
     const rewardPerWinner = store.pot / survivors;
     const isWinner = store.hasJoined && !store.isEliminated;
     if (isWinner) {
@@ -314,18 +238,14 @@ export const WarOfWitsScene = () => {
 
   useEffect(() => {
     const timeout = setTimeout(() => {
-      setStablePlayerCount(participants.length);
+      setStablePlayerCount(joinedPlayers.length);
     }, 180);
     return () => clearTimeout(timeout);
-  }, [participants.length]);
+  }, [joinedPlayers.length]);
 
   useEffect(() => {
-    void syncParticipants();
-    void syncReadyState();
     void syncSabotageEvents();
     const interval = setInterval(() => {
-      void syncParticipants();
-      void syncReadyState();
       void syncSabotageEvents();
       setNowMs(Date.now());
     }, 1000);
@@ -379,6 +299,8 @@ export const WarOfWitsScene = () => {
     autoDistributeReward();
     const timeout = setTimeout(() => {
       dispatch({ type: "RESET" });
+      setJoinedPlayers([]);
+      setStablePlayerCount(0);
       setStatusMessage("Back to lobby.");
       void updateStartedState(false);
     }, FINISHED_SECONDS * 1000);
@@ -391,25 +313,17 @@ export const WarOfWitsScene = () => {
         return (
           <div className="space-y-4 rounded-2xl border border-white/20 bg-black/30 p-5">
             <p className="text-sm uppercase tracking-[0.18em] text-cyan-200">Lobby</p>
-            <p className="text-sm text-white/80">
-              Players can join during a 10-second window. Then questions start automatically.
-            </p>
+            <p className="text-sm text-white/80">Single-player demo mode. Join and questions start instantly.</p>
             <div className="flex flex-wrap gap-3">
               <button
                 onClick={joinGame}
-                disabled={!playerAddress || store.hasJoined}
+                disabled={store.hasJoined}
                 className="btn btn-sm border border-cyan-300/70 bg-gradient-to-r from-cyan-400/30 to-blue-500/30 font-black uppercase tracking-[0.08em] text-cyan-100 shadow-[0_0_18px_rgba(56,189,248,0.55)] hover:from-cyan-300/40 hover:to-blue-400/40 disabled:border-white/20 disabled:bg-white/5 disabled:text-white/45 disabled:shadow-none"
               >
                 {store.hasJoined ? "Joined" : "Join The Match (1 MON)"}
               </button>
             </div>
             <p className="text-xs text-white/70">Joined players: {stablePlayerCount}</p>
-            {countdownLeft !== null && stablePlayerCount > 0 ? (
-              <p className="text-xs text-emerald-300">Starting in: {countdownLeft}</p>
-            ) : null}
-            {countdownLeft === null && stablePlayerCount > 0 && !contestSync.started ? (
-              <p className="text-xs text-cyan-200">Waiting for first join to start 10-second countdown.</p>
-            ) : null}
           </div>
         );
       case "PLAYING":
@@ -467,7 +381,7 @@ export const WarOfWitsScene = () => {
             </p>
             <p className="text-sm text-emerald-200">Auto reset in {FINISHED_SECONDS} seconds.</p>
             <p className="text-xs text-white/70">
-              Winners: {Math.max(1, participants.length)} | Pool: {store.pot.toFixed(2)} MON
+              Winners: {Math.max(1, joinedPlayers.length)} | Pool: {store.pot.toFixed(2)} MON
             </p>
           </div>
         );
@@ -533,7 +447,10 @@ export const WarOfWitsScene = () => {
           {statusMessage}
         </div>
       </div>
-      <VictoryOverlay visible={store.phase === "FINISHED"} winnerName={winnerCandidate ? playerAddress : null} />
+      <VictoryOverlay
+        visible={store.phase === "FINISHED"}
+        winnerName={winnerCandidate ? playerAddress : "Demo Winner"}
+      />
     </main>
   );
 };
