@@ -1,0 +1,36 @@
+{
+  "language": "Solidity",
+  "sources": {
+    "contracts/YourContract.sol": {
+      "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.17;\n\ncontract YourContract {\n    address public owner;\n    uint256 public totalPot;\n\n    event AnswerSubmitted(address indexed player, string questionId, string answerId, bool correct, uint256 reward);\n\n    constructor(address _owner) payable {\n        owner = _owner;\n        totalPot = msg.value;\n    }\n\n    modifier onlyOwner() {\n        require(msg.sender == owner, \"Not owner\");\n        _;\n    }\n\n    function addToPot() external payable {\n        totalPot += msg.value;\n    }\n\n    function submitAnswer(string calldata questionId, string calldata answerId, bool isCorrect) external {\n        uint256 reward = 0;\n        if (isCorrect) {\n            reward = totalPot / 10;\n            if (reward > 0 && address(this).balance >= reward) {\n                totalPot -= reward;\n                (bool sent, ) = payable(msg.sender).call{ value: reward }(\"\");\n                require(sent, \"Transfer failed\");\n            }\n        }\n        emit AnswerSubmitted(msg.sender, questionId, answerId, isCorrect, reward);\n    }\n\n    function withdraw() external onlyOwner {\n        uint256 balance = address(this).balance;\n        totalPot = 0;\n        (bool sent, ) = payable(owner).call{ value: balance }(\"\");\n        require(sent, \"Withdraw failed\");\n    }\n\n    receive() external payable {\n        totalPot += msg.value;\n    }\n}"
+    }
+  },
+  "settings": {
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "paris",
+    "outputSelection": {
+      "*": {
+        "*": [
+          "abi",
+          "evm.bytecode",
+          "evm.deployedBytecode",
+          "evm.methodIdentifiers",
+          "metadata",
+          "devdoc",
+          "userdoc",
+          "storageLayout",
+          "evm.gasEstimates"
+        ],
+        "": [
+          "ast"
+        ]
+      }
+    },
+    "metadata": {
+      "useLiteralContent": true
+    }
+  }
+}
