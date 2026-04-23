@@ -7,7 +7,7 @@ import { GenericContractsDeclaration } from "~~/utils/scaffold-eth/contract";
 const deployedContracts = {
   10143: {
     YourContract: {
-      address: "0x45f74e1F446b41038f0f6BCBaC5c85296A84D8b6",
+      address: "0x0b5e8F1D2a927377BAc4b6Ea107347E90e3218C7",
       abi: [
         {
           inputs: [
@@ -17,7 +17,7 @@ const deployedContracts = {
               type: "address",
             },
           ],
-          stateMutability: "nonpayable",
+          stateMutability: "payable",
           type: "constructor",
         },
         {
@@ -26,42 +26,42 @@ const deployedContracts = {
             {
               indexed: true,
               internalType: "address",
-              name: "greetingSetter",
+              name: "player",
               type: "address",
             },
             {
               indexed: false,
               internalType: "string",
-              name: "newGreeting",
+              name: "questionId",
+              type: "string",
+            },
+            {
+              indexed: false,
+              internalType: "string",
+              name: "answerId",
               type: "string",
             },
             {
               indexed: false,
               internalType: "bool",
-              name: "premium",
+              name: "correct",
               type: "bool",
             },
             {
               indexed: false,
               internalType: "uint256",
-              name: "value",
+              name: "reward",
               type: "uint256",
             },
           ],
-          name: "GreetingChange",
+          name: "AnswerSubmitted",
           type: "event",
         },
         {
           inputs: [],
-          name: "greeting",
-          outputs: [
-            {
-              internalType: "string",
-              name: "",
-              type: "string",
-            },
-          ],
-          stateMutability: "view",
+          name: "addToPot",
+          outputs: [],
+          stateMutability: "payable",
           type: "function",
         },
         {
@@ -78,53 +78,31 @@ const deployedContracts = {
           type: "function",
         },
         {
-          inputs: [],
-          name: "premium",
-          outputs: [
-            {
-              internalType: "bool",
-              name: "",
-              type: "bool",
-            },
-          ],
-          stateMutability: "view",
-          type: "function",
-        },
-        {
           inputs: [
             {
               internalType: "string",
-              name: "_newGreeting",
+              name: "questionId",
               type: "string",
             },
+            {
+              internalType: "string",
+              name: "answerId",
+              type: "string",
+            },
+            {
+              internalType: "bool",
+              name: "isCorrect",
+              type: "bool",
+            },
           ],
-          name: "setGreeting",
+          name: "submitAnswer",
           outputs: [],
-          stateMutability: "payable",
+          stateMutability: "nonpayable",
           type: "function",
         },
         {
           inputs: [],
-          name: "totalCounter",
-          outputs: [
-            {
-              internalType: "uint256",
-              name: "",
-              type: "uint256",
-            },
-          ],
-          stateMutability: "view",
-          type: "function",
-        },
-        {
-          inputs: [
-            {
-              internalType: "address",
-              name: "",
-              type: "address",
-            },
-          ],
-          name: "userGreetingCounter",
+          name: "totalPot",
           outputs: [
             {
               internalType: "uint256",
@@ -148,7 +126,7 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 27286416,
+      deployedOnBlock: 27292058,
     },
   },
   31337: {
