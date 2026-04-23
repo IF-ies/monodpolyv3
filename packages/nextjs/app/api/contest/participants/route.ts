@@ -11,6 +11,8 @@ type ContestStateStore = {
   hostAddress: string | null;
   minParticipants: number;
   targetParticipants: number;
+  countdownStartedAt: number | null;
+  countdownSeconds: number;
 };
 
 declare global {

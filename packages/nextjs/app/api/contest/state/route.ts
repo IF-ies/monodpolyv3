@@ -7,6 +7,8 @@ type ContestState = {
   hostAddress: string | null;
   minParticipants: number;
   targetParticipants: number;
+  countdownStartedAt: number | null;
+  countdownSeconds: number;
 };
 
 type ParticipantStore = {
@@ -29,6 +31,8 @@ const getContestState = (): ContestState => {
       hostAddress: null,
       minParticipants: 2,
       targetParticipants: 2,
+      countdownStartedAt: null,
+      countdownSeconds: 5,
     };
   }
   return global.__contestStateStore;
@@ -86,20 +90,40 @@ export async function POST(request: Request) {
       store.hostAddress = null;
       store.minParticipants = 2;
       store.targetParticipants = 2;
+      store.countdownStartedAt = null;
+      store.countdownSeconds = 5;
     }
   }
   if (typeof body.startedAt === "number" || body.startedAt === null) {
     store.startedAt = body.startedAt;
   }
 
-  if (body.startRequest) {
-    const allReady = participants.length > 0 && participants.every(item => store.readyParticipants.includes(item));
-    const enoughParticipants =
-      participants.length >= store.minParticipants && participants.length >= store.targetParticipants;
-    if (allReady && enoughParticipants) {
+  const allReady = participants.length > 1 && participants.every(item => store.readyParticipants.includes(item));
+  const enoughParticipants =
+    participants.length >= store.minParticipants && participants.length >= store.targetParticipants;
+
+  if (allReady && enoughParticipants && !store.started && !store.countdownStartedAt) {
+    store.countdownStartedAt = Date.now();
+    store.countdownSeconds = 5;
+  }
+
+  if ((!allReady || !enoughParticipants) && !store.started) {
+    store.countdownStartedAt = null;
+  }
+
+  if (store.countdownStartedAt && !store.started) {
+    const elapsedSeconds = Math.floor((Date.now() - store.countdownStartedAt) / 1000);
+    if (elapsedSeconds >= store.countdownSeconds) {
       store.started = true;
       store.startedAt = Date.now();
+      store.countdownStartedAt = null;
     }
+  }
+
+  if (body.startRequest && allReady && enoughParticipants && !store.started) {
+    store.started = true;
+    store.startedAt = Date.now();
+    store.countdownStartedAt = null;
   }
 
   return NextResponse.json(store);
