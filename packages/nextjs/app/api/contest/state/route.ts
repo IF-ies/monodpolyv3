@@ -10,6 +10,7 @@ type ContestState = {
   countdownStartedAt: number | null;
   countdownSeconds: number;
 };
+const JOIN_WINDOW_SECONDS = 10;
 
 type ParticipantStore = {
   participants: string[];
@@ -42,8 +43,34 @@ const getParticipants = (): string[] => {
   return global.__contestStore?.participants ?? [];
 };
 
+const advanceContestState = (store: ContestState, participants: string[]) => {
+  if (store.started) return;
+
+  if (participants.length === 0) {
+    store.countdownStartedAt = null;
+    store.readyParticipants = [];
+    store.countdownSeconds = JOIN_WINDOW_SECONDS;
+    return;
+  }
+
+  if (!store.countdownStartedAt) {
+    store.countdownStartedAt = Date.now();
+    store.countdownSeconds = JOIN_WINDOW_SECONDS;
+  }
+
+  const elapsedSeconds = Math.floor((Date.now() - store.countdownStartedAt) / 1000);
+  if (elapsedSeconds >= store.countdownSeconds) {
+    store.started = true;
+    store.startedAt = Date.now();
+    store.countdownStartedAt = null;
+  }
+};
+
 export async function GET() {
-  return NextResponse.json(getContestState());
+  const store = getContestState();
+  const participants = getParticipants();
+  advanceContestState(store, participants);
+  return NextResponse.json(store);
 }
 
 export async function POST(request: Request) {
@@ -96,36 +123,16 @@ export async function POST(request: Request) {
       store.minParticipants = 2;
       store.targetParticipants = 2;
       store.countdownStartedAt = null;
-      store.countdownSeconds = 5;
+      store.countdownSeconds = JOIN_WINDOW_SECONDS;
     }
   }
   if (typeof body.startedAt === "number" || body.startedAt === null) {
     store.startedAt = body.startedAt;
   }
 
-  const allReady = participants.length > 1 && participants.every(item => store.readyParticipants.includes(item));
-  const enoughParticipants =
-    participants.length >= store.minParticipants && participants.length >= store.targetParticipants;
+  advanceContestState(store, participants);
 
-  if (allReady && enoughParticipants && !store.started && !store.countdownStartedAt) {
-    store.countdownStartedAt = Date.now();
-    store.countdownSeconds = 5;
-  }
-
-  if ((!allReady || !enoughParticipants) && !store.started) {
-    store.countdownStartedAt = null;
-  }
-
-  if (store.countdownStartedAt && !store.started) {
-    const elapsedSeconds = Math.floor((Date.now() - store.countdownStartedAt) / 1000);
-    if (elapsedSeconds >= store.countdownSeconds) {
-      store.started = true;
-      store.startedAt = Date.now();
-      store.countdownStartedAt = null;
-    }
-  }
-
-  if (body.startRequest && allReady && enoughParticipants && !store.started) {
+  if (body.startRequest && participants.length > 0 && !store.started) {
     store.started = true;
     store.startedAt = Date.now();
     store.countdownStartedAt = null;

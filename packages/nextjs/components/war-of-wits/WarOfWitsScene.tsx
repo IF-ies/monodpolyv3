@@ -7,10 +7,7 @@ import { mockQuestions } from "./mockData";
 import type { EliminationItem, WinnerItem } from "./types";
 import confetti from "canvas-confetti";
 import { motion } from "framer-motion";
-import { parseEther } from "viem";
 import { useAccount } from "wagmi";
-import { useScaffoldReadContract, useScaffoldWriteContract } from "~~/hooks/scaffold-eth";
-import { getParsedError, notification } from "~~/utils/scaffold-eth";
 
 type GamePhase = "LOBBY" | "PLAYING" | "ELIMINATED" | "FINISHED";
 type ContestSyncState = {
@@ -124,7 +121,6 @@ export const WarOfWitsScene = () => {
   const playerAddress = isConnected && address ? address.toLowerCase() : null;
   const [store, dispatch] = useReducer(reducer, initialState);
   const [participants, setParticipants] = useState<string[]>([]);
-  const [readyParticipants, setReadyParticipants] = useState<string[]>([]);
   const [contestSync, setContestSync] = useState<ContestSyncState>({
     started: false,
     startedAt: null,
@@ -141,32 +137,13 @@ export const WarOfWitsScene = () => {
   const [lastProcessedSabotageId, setLastProcessedSabotageId] = useState(0);
   const [nowMs, setNowMs] = useState(Date.now());
   const [lastSabotageQuestionIndex, setLastSabotageQuestionIndex] = useState(-1);
-  const [isTogglingReady, setIsTogglingReady] = useState(false);
-  const [optimisticReady, setOptimisticReady] = useState<boolean | null>(null);
   const [stablePlayerCount, setStablePlayerCount] = useState(0);
-  const [readyVisualState, setReadyVisualState] = useState<"idle" | "pending" | "joined">("idle");
-
-  const { data: onchainPotPulse } = useScaffoldReadContract({
-    contractName: "YourContract",
-    functionName: "totalPot",
-    watch: true,
-  });
-  const {
-    writeContractAsync: writeReadyTx,
-    isPending: isReadyPending,
-    isMining: isReadyMining,
-  } = useScaffoldWriteContract({
-    contractName: "YourContract",
-  });
 
   const currentQuestion = useMemo(
     () => mockQuestions[Math.min(store.currentQuestionIndex, mockQuestions.length - 1)],
     [store.currentQuestionIndex],
   );
 
-  const serverReady = playerAddress ? readyParticipants.includes(playerAddress) : false;
-  const isReady = optimisticReady ?? serverReady;
-  const isReadyBusy = isTogglingReady || isReadyPending || isReadyMining;
   const isFrozen = nowMs < freezeUntil;
   const isTimerHidden = nowMs < hideTimerUntil;
   const sabotageOnCooldown = store.phase === "PLAYING" && lastSabotageQuestionIndex === store.currentQuestionIndex;
@@ -197,18 +174,12 @@ export const WarOfWitsScene = () => {
       countdownSeconds: typeof data.countdownSeconds === "number" ? data.countdownSeconds : 5,
     };
     setContestSync(normalized);
-    setReadyParticipants(nextReady);
-    if (playerAddress) {
-      setOptimisticReady(nextReady.includes(playerAddress));
-    } else {
-      setOptimisticReady(null);
-    }
     if (
       normalized.started &&
       store.phase === "LOBBY" &&
       store.hasJoined &&
       !store.isEliminated &&
-      participants.length > 1
+      participants.length > 0
     ) {
       dispatch({ type: "START_PLAYING", timer: QUESTION_SECONDS });
       setStatusMessage("Match started. Good luck.");
@@ -272,56 +243,9 @@ export const WarOfWitsScene = () => {
     });
     dispatch({ type: "JOIN", entryFee: ENTRY_FEE });
     setWalletBalance(previous => Math.max(0, previous - ENTRY_FEE));
-    setStatusMessage("Joined. Payed 1 MON entry fee.");
+    setStatusMessage("Joined. 10-second join window started.");
     await syncParticipants();
-  };
-
-  const toggleReady = async () => {
-    if (!playerAddress || !store.hasJoined || store.phase !== "LOBBY" || isReadyBusy) return;
-    const nextReady = !isReady;
-    setIsTogglingReady(true);
-    setOptimisticReady(nextReady);
-    try {
-      setReadyVisualState("pending");
-      await writeReadyTx({
-        functionName: "addToPot",
-        value: parseEther("0"),
-      });
-      const response = await fetch("/api/contest/state", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ readyAddress: playerAddress, isReady: nextReady }),
-      });
-      if (!response.ok) {
-        setOptimisticReady(serverReady);
-        setReadyVisualState(serverReady ? "joined" : "idle");
-        setStatusMessage("Ready update failed. Please try again.");
-        notification.error("Ready update failed. Please try again.");
-        return;
-      }
-      await syncReadyState();
-      setReadyVisualState(nextReady ? "joined" : "idle");
-      setStatusMessage(nextReady ? "Ready confirmed. Waiting for others..." : "You are unready.");
-      notification.success(nextReady ? "Ready confirmed." : "Set to unready.");
-    } catch (error) {
-      const parsedError = getParsedError(error).toLowerCase();
-      const isUserRejected = parsedError.includes("user rejected") || parsedError.includes("rejected");
-      const isInsufficientBalance = parsedError.includes("insufficient");
-      setOptimisticReady(serverReady);
-      setReadyVisualState(serverReady ? "joined" : "idle");
-      if (isUserRejected) {
-        setStatusMessage("Transaction rejected from wallet.");
-        notification.error("Transaction rejected from wallet.");
-      } else if (isInsufficientBalance) {
-        setStatusMessage("Insufficient balance for transaction.");
-        notification.error("Insufficient balance for transaction.");
-      } else {
-        setStatusMessage("Ready transaction failed.");
-        notification.error(getParsedError(error));
-      }
-    } finally {
-      setIsTogglingReady(false);
-    }
+    await syncReadyState();
   };
 
   const eliminateCurrentPlayer = async (reason: string) => {
@@ -393,19 +317,7 @@ export const WarOfWitsScene = () => {
       setStablePlayerCount(participants.length);
     }, 180);
     return () => clearTimeout(timeout);
-  }, [participants.length, onchainPotPulse]);
-
-  useEffect(() => {
-    if (!store.hasJoined) {
-      setReadyVisualState("idle");
-      return;
-    }
-    if (isReadyBusy) {
-      setReadyVisualState("pending");
-      return;
-    }
-    setReadyVisualState(isReady ? "joined" : "idle");
-  }, [store.hasJoined, isReadyBusy, isReady]);
+  }, [participants.length]);
 
   useEffect(() => {
     void syncParticipants();
@@ -480,7 +392,7 @@ export const WarOfWitsScene = () => {
           <div className="space-y-4 rounded-2xl border border-white/20 bg-black/30 p-5">
             <p className="text-sm uppercase tracking-[0.18em] text-cyan-200">Lobby</p>
             <p className="text-sm text-white/80">
-              Join and press ready. Game starts for everyone after 5-second countdown.
+              Players can join during a 10-second window. Then questions start automatically.
             </p>
             <div className="flex flex-wrap gap-3">
               <button
@@ -490,38 +402,13 @@ export const WarOfWitsScene = () => {
               >
                 {store.hasJoined ? "Joined" : "Join The Match (1 MON)"}
               </button>
-              <button
-                onClick={toggleReady}
-                disabled={!playerAddress || !store.hasJoined || isReadyBusy}
-                className={`btn btn-sm font-bold uppercase tracking-[0.08em] ${
-                  readyVisualState === "joined"
-                    ? "border border-sky-300/70 bg-sky-500/25 text-sky-100 hover:bg-sky-500/30"
-                    : "border border-emerald-300/70 bg-emerald-400/20 text-emerald-100 hover:bg-emerald-300/25"
-                } disabled:border-white/20 disabled:bg-white/5 disabled:text-white/45`}
-              >
-                {isReadyBusy ? (
-                  <span className="inline-flex items-center gap-2">
-                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent" />
-                    Processing...
-                  </span>
-                ) : readyVisualState === "joined" ? (
-                  "WAITING..."
-                ) : (
-                  "READY"
-                )}
-              </button>
             </div>
-            <p className="text-xs text-white/70">
-              Ready: {readyParticipants.length}/{stablePlayerCount}
-            </p>
-            {stablePlayerCount <= 1 ? <p className="text-xs text-rose-300">1 kişi varsa yarışma başlamaz.</p> : null}
-            {countdownLeft !== null && stablePlayerCount > 1 ? (
-              <p className="text-xs text-emerald-300">All ready. Starting in: {countdownLeft}</p>
+            <p className="text-xs text-white/70">Joined players: {stablePlayerCount}</p>
+            {countdownLeft !== null && stablePlayerCount > 0 ? (
+              <p className="text-xs text-emerald-300">Starting in: {countdownLeft}</p>
             ) : null}
-            {countdownLeft === null && stablePlayerCount > 1 && readyParticipants.length < stablePlayerCount ? (
-              <p className="text-xs text-rose-300">
-                Hazir vermesi bekleniyor: {participants.find(item => !readyParticipants.includes(item))}
-              </p>
+            {countdownLeft === null && stablePlayerCount > 0 && !contestSync.started ? (
+              <p className="text-xs text-cyan-200">Waiting for first join to start 10-second countdown.</p>
             ) : null}
           </div>
         );
